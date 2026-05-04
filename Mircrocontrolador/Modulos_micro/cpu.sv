@@ -1,21 +1,3 @@
-// Descripción:
-//   Procesador RISC-V rv32i con pipeline de 5 etapas (IF/ID/EX/MEM/WB),
-//   forwarding y detección de hazards.
-//
-//   Adaptado del Proyecto 2 (Alejandro Bejarano) con las siguientes
-//   correcciones y modificaciones:
-//
-//   [FIX 1] funct3E/funct7E ahora se conectan a la ALU (antes hardcodeados)
-//   [FIX 2] Branch comparator dedicado para beq/bne/blt/bge
-//   [FIX 3] jalr usa ALU result (rs1+imm) como target, no PC+imm
-//   [FIX 4] Punto y coma faltante en mux31B
-//   [MOD 1] Buses de datos externalizados (DataAddress, DataOut, DataIn, we)
-//   [MOD 2] Bus de instrucciones externalizado (ProgAddress, ProgIn)
-//
-//   La data_memory y instruction_memory ya NO están instanciadas aquí.
-//   Se conectan externamente junto con el address_decoder y read_mux.
-// ============================================================================
-
 module cpu (
     input  logic        clk,
     input  logic        reset,
