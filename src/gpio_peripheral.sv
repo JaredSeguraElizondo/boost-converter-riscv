@@ -7,10 +7,11 @@ module gpio_peripheral (
     input  logic        boton_i
 );
 
-    localparam int DEBOUNCE_MAX = 1_000;
+    // [FIX] Debounce de 20 ms a 100 MHz (antes era 1000 = 10 us, insuficiente)
+    localparam int DEBOUNCE_MAX = 2_000_000;
 
     logic [1:0]  sync_boton;
-    logic [19:0] debounce_ctr;
+    logic [20:0] debounce_ctr;   // 21 bits para alcanzar 2_000_000
     logic        boton_estable;
 
     // Sincronizador de doble flip-flop
@@ -24,18 +25,18 @@ module gpio_peripheral (
     // Debounce
     always_ff @(posedge clk_i) begin
         if (rst_i) begin
-            debounce_ctr  <= 20'd0;
+            debounce_ctr  <= '0;
             boton_estable <= 1'b0;
         end else begin
             if (sync_boton[1] != boton_estable) begin
                 if (debounce_ctr >= DEBOUNCE_MAX - 1) begin
                     boton_estable <= sync_boton[1];
-                    debounce_ctr  <= 20'd0;
+                    debounce_ctr  <= '0;
                 end else begin
                     debounce_ctr <= debounce_ctr + 1'b1;
                 end
             end else begin
-                debounce_ctr <= 20'd0;
+                debounce_ctr <= '0;
             end
         end
     end
