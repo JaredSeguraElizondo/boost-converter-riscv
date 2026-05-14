@@ -10,7 +10,7 @@ El convertidor boost se utiliza para elevar una tensión DC de entrada, siendo c
 
 Este proyecto replica el enfoque industrial de control embebido, pero diseñando desde cero un sistema basado en RISC-V y periféricos digitales, en lugar de usar un microcontrolador comercial.
 
-# Documentación del Proyecto
+# Investigación Previa
 
 ## 1. Arquitectura RISC-V RV32I y periféricos mapeados en memoria
 
@@ -176,7 +176,6 @@ Las discrepancias entre modelo y experimento suelen deberse a no linealidades, r
 
 
 ## Módulo: UART (`uart_core_inst`)
-
 **Objetivo:**  
 Núcleo UART encargado de la serialización y deserialización de datos para transmisión y recepción serial.
 
@@ -212,8 +211,8 @@ Se reutiliza el núcleo UART porque ya implementa el generador de baudrate y la 
 Interfaz estándar de 8 bits con flags de estado.
 
 ---
-
-## 2. Sincronizador `reg_send → tx_start_uart` (CPU → UART)
+## Sub-Módulos
+### Sincronizador `reg_send → tx_start_uart` (CPU → UART)
 
 **Objetivo:**  
 Cruzar la señal `reg_send` del dominio `clk_cpu_i` al dominio `clk_uart_i` evitando metaestabilidad.
@@ -246,7 +245,7 @@ Equivale a un retardo de 2 ciclos en el dominio UART.
 
 ---
 
-## 3. Sincronizador + Detector de Flanco `tx_rdy` (UART → CPU)
+## Sincronizador + Detector de Flanco `tx_rdy` (UART → CPU)
 
 **Objetivo:**  
 Sincronizar `tx_rdy_uart` al dominio CPU y generar un pulso de un ciclo ante flanco de subida.
@@ -284,7 +283,7 @@ Si:
 
 ---
 
-## 4. Sincronizador + Detector de Flanco `rx_rdy` (UART → CPU)
+##  Sincronizador + Detector de Flanco `rx_rdy` (UART → CPU)
 
 **Objetivo:**  
 Generar `rx_rdy_pulse` para capturar el dato recibido.
@@ -308,7 +307,7 @@ Estructura idéntica al detector de `tx_rdy`:
 
 ---
 
-## 5. Registros de Control / Estado (dominio CPU)
+## Registros de Control / Estado (dominio CPU)
 
 **Objetivo:**  
 Banco de registros accesibles por el procesador.  
@@ -359,7 +358,7 @@ Eventos automáticos:
 
 ---
 
-## 6. Bus de Lectura (lógica combinacional `rdata_o`)
+## Bus de Lectura (lógica combinacional `rdata_o`)
 
 **Objetivo:**  
 Exponer el estado interno al procesador durante lecturas.
@@ -398,5 +397,173 @@ Los bits superiores del bus de 32 bits se rellenan con ceros.
 
 ---
 
+# Memoria de Datos
+
+---
+
+##  RAM: Arreglo de Memoria (`mem`)
+
+**Nombre:**  
+`mem` — Arreglo de palabras de 32 bits
+
+**Objetivo:**  
+Almacenar los datos del sistema.  
+Consta de 1024 posiciones de 32 bits cada una → total de **4 KB de RAM de datos**.
+
+**Entradas:**  
+- Señales de escritura provenientes de la lógica síncrona:
+  - `WD[31:0]`
+  - Dirección decodificada `A[11:2]`
+  - `WE`
+
+**Salidas:**  
+- `RD[31:0]` (dato leído hacia la lógica combinacional)
+
+**Relación con otros módulos:**  
+Es el recurso compartido entre:
+- Lógica de escritura (síncrona)
+- Lógica de lectura (asíncrona)
+
+Ambas acceden en paralelo mediante `A[11:2]`.
+
+**[Imagen]**
+
+### Funcionamiento
+
+Se declara como:
+`logic [31:0] mem [0:1023];`
+
+
+- Se indexa con `A[11:2]` (10 bits)
+- `2¹⁰ = 1024` posiciones
+- `A[1:0]` se descartan (alineación a palabra de 4 bytes)
+- `A[31:12]` se ignoran (la decodificación externa decide si la dirección pertenece a la RAM)
+
+En reset, todas las posiciones se inicializan en cero.
+
+### Diseño y Justificación
+
+- La FPGA infiere este arreglo como **BRAM o distributed RAM**.
+- Uso de `A[11:2]`:
+  - 10 bits → 1024 palabras
+- Alineación a word (32 bits)
+- Decodificación de región de memoria ocurre fuera del módulo.
+
+---
+
+## Sub-Módulos
+###  Módulo: Lógica de Escritura Síncrona (`always_ff`)
+
+**Nombre:**  
+Escritura síncrona con reset
+
+**Objetivo:**  
+- Escribir datos de 32 bits en memoria.
+- Inicializar toda la memoria en cero durante reset.
+
+**Entradas:**  
+- `clk`
+- `reset`
+- `WE`
+- `A[11:2]`
+- `WD[31:0]`
+
+**Salidas:**  
+- Actualización de `mem[A[11:2]]`
+
+**Relación:**  
+Recibe señales del bus del procesador:
+- `WE` ← `we_ram_o`
+- `A`, `WD` ← pipeline
+
+**[Imagen]**
+
+### Funcionamiento
+
+En cada flanco positivo del reloj:
+
+1. Si `reset = 1`  
+   → Un bucle `for` inicializa las 1024 posiciones en cero  
+   (la síntesis lo convierte en lógica paralela).
+
+2. Si `reset = 0` y `WE = 1`  
+   → `mem[A[11:2]] ← WD`
+
+3. Si `WE = 0`  
+   → No hay cambio (los registros mantienen su valor)
+
+### Tabla de verdad – Escritura
+
+| reset | WE | Acción |
+|--------|----|--------|
+| 1 | X | `mem[todos] ← 0` |
+| 0 | 1 | `mem[A[11:2]] ← WD` |
+| 0 | 0 | Sin cambio |
+
+### Diseño
+
+La prioridad:
+`if (reset)`
+`else if (WE)`
+es intencional:  
+el reset siempre tiene prioridad sobre escritura.
+
+El sintetizador infiere:
+- Flip-flop por cada bit
+- `WE` como clock enable
+- Reset síncrono
+
+---
+
+##  Módulo: Lógica de Lectura Asíncrona
+
+**Nombre:**  
+Lectura combinacional
+
+**Objetivo:**  
+Exponer inmediatamente el contenido de la posición apuntada por `A`.
+
+**Entradas:**  
+- `A[11:2]`
+- `mem[A[11:2]]`
+
+**Salidas:**  
+- `RD[31:0]`
+
+**Relación:**  
+Conecta directamente la memoria con el bus de lectura del procesador.  
+El resultado alimenta el `read_mux` del pipeline.
+
+**[Imagen]**
+
+### Funcionamiento
+
+Implementado con: `assign RD = mem[A[11:2]];`
+
+- Camino puramente combinacional.
+- No hay flip-flops intermedios.
+- Cuando cambia `A`, `RD` se actualiza en el mismo ciclo
+  (considerando el retardo de propagación).
+
+### Diseño y Justificación
+
+La lectura asíncrona es una decisión arquitectónica deliberada:
+
+- En el pipeline RV32I:
+  - La dirección se genera en la etapa MEM.
+  - El dato debe estar disponible antes del flanco de escritura en WB.
+- Si la lectura fuera síncrona:
+  - Se necesitaría un ciclo extra
+  - O un stall del pipeline
+
+Al usar lectura combinacional:
+- Se evita latencia adicional
+- Se mantiene eficiencia del pipeline
+
+En FPGA Artix-7, el sintetizador puede inferir:
+- BRAM en modo read-first
+- O distributed RAM
+
+Ambas permiten lectura asíncrona.
 
 
