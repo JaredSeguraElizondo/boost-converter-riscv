@@ -211,7 +211,7 @@ Se reutiliza el núcleo UART porque ya implementa el generador de baudrate y la 
 Interfaz estándar de 8 bits con flags de estado.
 
 ---
-## Sub-Módulos
+## _Sub-Módulos_
 ### Sincronizador `reg_send → tx_start_uart` (CPU → UART)
 
 **Objetivo:**  
@@ -426,7 +426,8 @@ Es el recurso compartido entre:
 
 Ambas acceden en paralelo mediante `A[11:2]`.
 
-**[Imagen]**
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/RAM1.png?ref_type=heads" width="440">
+
 
 ### Funcionamiento
 
@@ -451,7 +452,7 @@ En reset, todas las posiciones se inicializan en cero.
 
 ---
 
-## Sub-Módulos
+## _Sub-Módulos_
 ###  Módulo: Lógica de Escritura Síncrona (`always_ff`)
 
 **Nombre:**  
@@ -476,7 +477,7 @@ Recibe señales del bus del procesador:
 - `WE` ← `we_ram_o`
 - `A`, `WD` ← pipeline
 
-**[Imagen]**
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/RAM2.png?ref_type=heads" width="400">
 
 ### Funcionamiento
 
@@ -534,7 +535,7 @@ Exponer inmediatamente el contenido de la posición apuntada por `A`.
 Conecta directamente la memoria con el bus de lectura del procesador.  
 El resultado alimenta el `read_mux` del pipeline.
 
-**[Imagen]**
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/RAM3.png?ref_type=heads" width="550">
 
 ### Funcionamiento
 
