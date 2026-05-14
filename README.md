@@ -169,3 +169,234 @@ Para validar el sistema implementado:
 
 Las discrepancias entre modelo y experimento suelen deberse a no linealidades, resistencias parásitas, retardo de muestreo o cuantización del ADC.
 
+
+# Descripción de Módulos 
+
+---
+
+
+## Módulo: UART (`uart_core_inst`)
+
+**Objetivo:**  
+Núcleo UART encargado de la serialización y deserialización de datos para transmisión y recepción serial.
+
+**Entradas:**  
+- `clk`  
+- `reset`  
+- `tx_start`  
+- `data_in[7:0]`  
+- `rx`
+
+**Salidas:**  
+- `tx_rdy`  
+- `rx_data_rdy`  
+- `data_out[7:0]`  
+- `tx`
+
+**Relación:**  
+Es instanciado por `uart_peripheral`.  
+Recibe datos y señal de inicio desde la lógica de sincronización y entrega datos recibidos junto con señales de estado.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/Uart01.png?ref_type=heads" width="500">
+
+
+**Funcionamiento:**  
+Es un IP externo instanciado como caja negra. Internamente incluye:
+- Transmisor: serializa `data_in` cuando `tx_start` se activa.
+- Receptor: muestrea `rx`, detecta el bit de inicio, captura 8 bits y activa `rx_data_rdy`.
+
+Opera completamente en el dominio `clk_uart_i`.
+
+**Diseño:**  
+Se reutiliza el núcleo UART porque ya implementa el generador de baudrate y la máquina de estados serie.  
+Interfaz estándar de 8 bits con flags de estado.
+
+---
+
+## 2. Sincronizador `reg_send → tx_start_uart` (CPU → UART)
+
+**Objetivo:**  
+Cruzar la señal `reg_send` del dominio `clk_cpu_i` al dominio `clk_uart_i` evitando metaestabilidad.
+
+**Entradas:**  
+- `clk_uart_i`  
+- `rst_uart_i`  
+- `reg_send`
+
+**Salidas:**  
+- `tx_start_uart`
+
+**Relación:**  
+Conecta el registro de control escrito por la CPU con la entrada `tx_start` del núcleo UART.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/Uart02.png?ref_type=heads" width ="500">
+
+**Funcionamiento:**  
+Implementado con dos flip-flops D en serie en el dominio `clk_uart_i`:
+
+- El primero absorbe posible metaestabilidad.
+- El segundo entrega una señal estable.
+
+`sync_send[1]` se asigna directamente a `tx_start_uart`.
+
+**Diseño:**  
+Patrón estándar de sincronizador de 2 FF.  
+No requiere lógica combinacional adicional.  
+Equivale a un retardo de 2 ciclos en el dominio UART.
+
+---
+
+## 3. Sincronizador + Detector de Flanco `tx_rdy` (UART → CPU)
+
+**Objetivo:**  
+Sincronizar `tx_rdy_uart` al dominio CPU y generar un pulso de un ciclo ante flanco de subida.
+
+**Entradas:**  
+- `clk_cpu_i`  
+- `rst_cpu_i`  
+- `tx_rdy_uart`
+
+**Salidas:**  
+- `tx_rdy_pulse`
+
+**Relación:**  
+El pulso limpia automáticamente `reg_send` y `tx_busy`.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/Uart03.png?ref_type=heads" width ="500">
+
+**Funcionamiento:**  
+Tres flip-flops en el dominio `clk_cpu_i` sincronizan la señal.  
+Si:
+
+- `sync[1] = 1`
+- `sync[2] = 0`
+
+→ se detecta flanco de subida y se genera un pulso de exactamente un ciclo CPU.
+
+### Tabla de verdad – Detector de flanco
+
+| sync[1] | sync[2] | tx_rdy_pulse |
+|----------|----------|--------------|
+| 0 | 0 | 0 |
+| 0 | 1 | 0 |
+| 1 | 0 | 1 (flanco detectado) |
+| 1 | 1 | 0 |
+
+---
+
+## 4. Sincronizador + Detector de Flanco `rx_rdy` (UART → CPU)
+
+**Objetivo:**  
+Generar `rx_rdy_pulse` para capturar el dato recibido.
+
+**Entradas:**  
+- `clk_cpu_i`  
+- `rst_cpu_i`  
+- `rx_rdy_uart`
+
+**Salidas:**  
+- `rx_rdy_pulse`
+
+**Relación:**  
+Dispara la captura de `data_out_uart` en `reg_data_rx` y activa `reg_new_rx`.
+
+**Diseño:**  
+Estructura idéntica al detector de `tx_rdy`:  
+- 3 FF en dominio CPU  
+- Lógica AND/NOT  
+- Misma tabla de verdad
+
+---
+
+## 5. Registros de Control / Estado (dominio CPU)
+
+**Objetivo:**  
+Banco de registros accesibles por el procesador.  
+Almacena estado y datos TX/RX.
+
+**Entradas:**  
+- `clk_cpu_i`  
+- `rst_cpu_i`  
+- `write_enable_i`  
+- `addr_i[1:0]`  
+- `wdata_i[31:0]`  
+- `tx_rdy_pulse`  
+- `rx_rdy_pulse`  
+- `data_out_uart[7:0]`
+
+**Salidas:**  
+- `reg_send`  
+- `reg_new_rx`  
+- `reg_data_tx[7:0]`  
+- `reg_data_rx[7:0]`  
+- `tx_busy`
+
+**Relación:**  
+Es el núcleo de control del periférico.  
+Interconecta CPU ↔ UART mediante sincronizadores.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/UART05.png?ref_type=heads" width ="500">
+
+### Funcionamiento
+
+Decodificación mediante `case(addr_i)`:
+
+- `00` → Control y estado
+- `01` → Dato TX
+
+Eventos automáticos:
+- `tx_rdy_pulse` → limpia `reg_send` y `tx_busy`
+- `rx_rdy_pulse` → captura `data_out_uart` y activa `reg_new_rx`
+
+### Tabla de decodificación de escritura
+
+| addr_i | Acción |
+|--------|--------|
+| 00 | `wdata[0]=1` → activa TX (`reg_send=1`, `tx_busy=1`) <br> `wdata[1]=1` → limpia `reg_new_rx` |
+| 01 | Carga `reg_data_tx` con `wdata[7:0]` |
+| 10 | Sin efecto |
+| 11 | Sin efecto |
+
+---
+
+## 6. Bus de Lectura (lógica combinacional `rdata_o`)
+
+**Objetivo:**  
+Exponer el estado interno al procesador durante lecturas.
+
+**Entradas:**  
+- `addr_i[1:0]`  
+- `tx_busy`  
+- `reg_new_rx`  
+- `reg_send`  
+- `reg_data_tx[7:0]`  
+- `reg_data_rx[7:0]`
+
+**Salidas:**  
+- `rdata_o[31:0]`
+
+**Relación:**  
+Canal de retorno hacia la CPU.  
+No tiene estado propio.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/Uart06.png?ref_type=heads" width ="500">
+
+**Funcionamiento:**  
+Lógica puramente combinacional (`always_comb`).  
+Un `case(addr_i)` selecciona el contenido de `rdata_o`.
+
+Los bits superiores del bus de 32 bits se rellenan con ceros.
+
+### Mapa de registros
+
+| addr_i | rdata_o[31:0] | Descripción |
+|--------|--------------|-------------|
+| 00 | `{29'b0, tx_busy, reg_new_rx, reg_send}` | Registro de estado |
+| 01 | `{24'b0, reg_data_tx}` | Dato TX |
+| 10 | `{24'b0, reg_data_rx}` | Dato RX |
+| 11 | `32'h0` | Sin uso |
+
+---
+
+
+
