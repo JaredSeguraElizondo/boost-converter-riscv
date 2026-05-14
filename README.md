@@ -567,4 +567,89 @@ En FPGA Artix-7, el sintetizador puede inferir:
 
 Ambas permiten lectura asíncrona.
 
+# ROM: Memoria de Instrucciones (IM)
+
+---
+
+## Módulo: Arreglo de Instrucciones (`IM`)
+
+**Nombre:**  
+`IM` — Arreglo ROM de instrucciones de 32 bits
+
+**Objetivo:**  
+Almacenar el programa compilado (instrucciones RV32I) de forma permanente durante la ejecución.
+
+Es una **ROM**:
+- Solo lectura
+- Nunca se escribe en tiempo de ejecución
+
+**Entradas:**  
+- Ninguna directa (se carga mediante `$readmemh` en síntesis/simulación)
+
+**Salidas:**  
+- Contenido de la posición indexada (hacia la lógica de lectura)
+
+**Relación:**  
+Es el recurso central del módulo.  
+La lógica de lectura accede a él directamente de forma combinacional.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ROM1.png?ref_type=headss" width="430">
+
+### Funcionamiento
+
+Se declara como:
+`logic [31:0] IM [0:2047]`
+
+
+- 2048 palabras de 32 bits
+- 2¹¹ = 2048 posiciones
+
+En simulación (y síntesis compatible):
+- El bloque `initial` carga el archivo `.hex`
+- Una vez cargado, su contenido no cambia
+
+### Diseño
+
+- No tiene `WE`
+- No tiene reset
+- No existe `always_ff` de escritura
+
+El sintetizador lo infiere como **ROM**.
+
+En FPGA Artix-7 puede mapearse a:
+- BRAM en modo ROM
+- LUTs si el tamaño lo permite
+
+---
+
+## Módulo: Inicialización desde archivo `.hex` (`initial`)
+
+**Nombre:**  
+Bloque `initial` — carga de programa
+
+**Objetivo:**  
+Inicializar el arreglo `IM` con el programa compilado antes de iniciar ejecución o simulación.
+
+**Entradas:**  
+- Archivo externo `programa.hex`
+
+**Salidas:**  
+- Arreglo `IM` completamente inicializado
+
+**Relación:**  
+Es el único mecanismo de “escritura” del módulo.  
+Ocurre una sola vez al inicio.
+
+Después de esto, `IM` es de solo lectura para el resto del sistema.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ROM2.png?ref_type=heads" width="430">
+
+### Funcionamiento
+
+Se utiliza la tarea del sistema:
+`$readmemh("programa.hex", IM);`
+
+
+
+
 
