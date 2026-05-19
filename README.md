@@ -649,6 +649,558 @@ Después de esto, `IM` es de solo lectura para el resto del sistema.
 Se utiliza la tarea del sistema:
 `$readmemh("programa.hex", IM);`
 
+Proceso:
+
+- Lee el archivo línea por línea
+- Cada línea representa un valor hexadecimal de 32 bits
+- Se carga en orden:  
+  `IM[0], IM[1], IM[2], ...`
+
+Si el archivo contiene menos de 2048 instrucciones:
+
+- En simulación → posiciones restantes quedan indefinidas
+- En síntesis → típicamente se inicializan en cero
+
+### Diseño
+
+El bloque `initial`:
+- No genera hardware físico
+- Es una directiva de inicialización
+
+En síntesis (Vivado):
+- El contenido del `.hex` se convierte en valores de inicialización de BRAM o LUTs
+- Queda grabado en el bitstream final
+
+---
+
+## 3. Módulo: Lectura Combinacional (`assign instruction`)
+
+**Nombre:**  
+Lectura asíncrona de instrucción
+
+**Objetivo:**  
+Entregar inmediatamente la instrucción apuntada por `address`, sin esperar reloj.
+
+Es el camino crítico del **Instruction Fetch** del pipeline.
+
+**Entradas:**  
+- `address[12:2]`
+- Contenido de `IM`
+
+**Salidas:**  
+- `instruction[31:0]` → hacia el registro IF/ID
+
+**Relación:**  
+Alimenta directamente la primera etapa del pipeline (IF).  
+La rapidez de esta lectura afecta el periodo máximo de reloj.
+
+**[Imagen]**
+
+### Funcionamiento
+
+Implementado con:
+`assign instruction = IM[address[12:2]];`
+
+
+- Camino puramente combinacional
+- No interviene ningún reloj
+- Cuando cambia `address` (actualización del PC),
+  `instruction` cambia en el mismo ciclo
+  (considerando retardo de acceso a memoria)
+
+---
+
+### Justificación del uso de `address[12:2]`
+
+| Bits | Uso | Razón |
+|------|------|--------|
+| `[1:0]` | Descartados | Instrucciones alineadas a 4 bytes |
+| `[12:2]` | Índice (11 bits) | 2¹¹ = 2048 posiciones |
+| `[31:13]` | Ignorados | Fuera del rango de la ROM |
+
+---
+
+## Diseño y Justificación General
+
+Al igual que en la RAM de datos:
+
+- La lectura asíncrona evita agregar latencia al pipeline.
+- Permite que la instrucción esté disponible dentro del mismo ciclo de fetch.
+
+Diferencia clave con `data_memory`:
+
+- No existe lógica de escritura en tiempo de ejecución.
+- El módulo se reduce a:
+  - Cargar una vez
+  - Leer siempre
+
+Esto simplifica la estructura y permite al sintetizador optimizarlo claramente como una **ROM pura**, habilitando mejores optimizaciones en FPGA.
+
+# Módulo – CPU RISC-V RV32I
+
+---
+
+## Nombre del módulo
+
+`riscv_cpu` — Procesador RISC-V de 32 bits (subconjunto RV32I)
+
+---
+
+## Objetivo
+
+Ejecutar instrucciones del subconjunto **RV32I** de forma secuencial y determinista, gestionando:
+
+- Flujo de control (PC y saltos)
+- Banco de registros
+- Unidad aritmético-lógica (ALU)
+- Interfaz con memoria de programa (ROM)
+- Interfaz con memoria/periféricos (bus de datos)
+
+---
+
+## Entradas
+
+| Señal        | Ancho | Descripción |
+|-------------|--------|------------|
+| `clk_i`      | 1      | Reloj del sistema |
+| `rst_i`      | 1      | Reset síncrono activo alto |
+| `ProgIn_i`   | 32     | Instrucción leída de ROM |
+| `DataIn_i`   | 32     | Dato leído de RAM o periférico |
+
+---
+
+## Salidas
+
+| Señal            | Ancho | Descripción |
+|------------------|--------|------------|
+| `ProgAddress_o`  | 32     | Dirección del PC hacia ROM |
+| `DataAddress_o`  | 32     | Dirección de acceso a datos |
+| `DataOut_o`      | 32     | Dato a escribir en RAM/periférico |
+| `we_o`           | 1      | Write enable hacia bus de datos |
+
+---
+
+## Relación con otros módulos
+
+El CPU es el núcleo central del sistema.
+
+- Lee instrucciones desde la **Program Memory (ROM)** mediante el bus de programa.
+- Lee y escribe datos en:
+  - Data Memory (RAM)
+  - Periféricos (PWM, ADC, VGA, UART, GPIO)
+
+Todo a través del **bus de datos unificado** y el `address decoder`.
+
+---
+
+## Explicación General de Funcionamiento
+
+El CPU implementa un pipeline de 5 etapas simplificado (o arquitectura monociclo/multiciclo según implementación).
+
+En cada ciclo:
+
+1. **Fetch**: Obtiene instrucción desde ROM usando el PC.
+2. **Decode**: Identifica operación y operandos.
+3. **Execute**: Opera en la ALU.
+4. **Memory**: Accede a RAM si la instrucción lo requiere.
+5. **Writeback**: Escribe resultado en el banco de registros.
+
+El PC se actualiza:
+- Secuencialmente (`PC + 4`)
+- O mediante salto/branch
+
+---
+
+## Arquitectura interna del CPU
+
+[Imagen]
+
+---
+
+# Submódulos del CPU (Nivel de Diseño)
+
+[Imagen]
+
+---
+
+## Submódulo – Program Counter (PC)
+
+[Imagen]
+
+### Diseño del PC
+
+- Registro de 32 bits
+- Implementado con **32 flip-flops tipo D en paralelo**
+- MUX 2:1 de 32 bits selecciona entre:
+  - `32'h0` (reset)
+  - `pc_next_i`
+
+`rst_i` actúa como señal `sel` del MUX.
+
+En cada flanco positivo:
+- El FF captura el valor de entrada D.
+- La salida Q alimenta:
+  - Sumador `PC + 4`
+  - Sumador de saltos
+- El resultado vuelve como `pc_next_i`.
+
+---
+
+## Submódulo – Instruction Decoder
+
+[Imagen]
+
+### Diseño
+
+Lógica puramente combinacional.
+
+Extracción directa mediante asignaciones:
+
+- `rs1 = IR[19:15]`
+- `rs2 = IR[24:20]`
+- `rd  = IR[11:7]`
+- `opcode = IR[6:0]`
+- `funct3 = IR[14:12]`
+- `funct7 = IR[31:25]`
+
+Los inmediatos se reconstruyen según tipo de instrucción:
+- Concatenación de campos
+- Extensión de signo
+
+---
+
+## Submódulo – Unidad de Control
+
+[Imagen]
+
+### Diseño
+
+Bloque combinacional:
+`always_comb`
+`case(opcode)`
+
+
+Cada rama del `case` asigna todas las señales de control.
+
+Es obligatorio:
+
+- Inicializar todas las señales en 0 al inicio del bloque
+- Evitar inferencia de latches en síntesis
+
+---
+
+## Submódulo – ALU de 32 bits
+
+[Imagen]
+
+### Diseño de la ALU
+
+Núcleo aritmético:
+
+- Sumador de 32 bits
+  - Ripple-carry o carry-lookahead
+
+Resta implementada con complemento a 2:
+
+`B_inv = B XOR {32{sub}}`
+`sum = A + B_inv + sub`
+
+
+Desplazamiento aritmético:
+
+- Uso de `>>>`
+- Operandos declarados como `signed`
+
+Selección final:
+
+- MUX de 8 entradas
+- Controlado por `alu_op[2:0]`
+
+---
+
+## Submódulo – Banco de Registros
+
+[Imagen]
+
+### Diseño
+
+- 32 registros de 32 bits
+- Registro x0 cableado permanentemente a 0
+- Dos puertos de lectura combinacionales
+- Un puerto de escritura síncrono
+- Escritura habilitada por `reg_write`
+
+---
+
+## Submódulo – Sign Extender
+
+[Imagen]
+
+### Diseño
+
+Bloque combinacional.
+
+Reconstruye inmediatos según tipo:
+
+- I-type
+- S-type
+- B-type
+- U-type
+- J-type
+
+Replica el bit más significativo para extensión de signo.
+
+---
+
+## Submódulo – Address Decoder
+
+Este módulo no está dentro del CPU, pero es parte central del sistema.
+
+[Imagen]
+
+### Función
+
+- Decodifica `DataAddress_o`
+- Determina si el acceso corresponde a:
+  - RAM
+  - UART
+  - PWM
+  - ADC
+  - VGA
+  - GPIO
+
+Genera:
+
+- Señales de habilitación específicas
+- Enrutamiento correcto del `DataIn_i`
+
+---
+
+# Justificación General de Diseño
+
+- Arquitectura modular → facilita verificación y síntesis.
+- Separación clara entre:
+  - Datapath
+  - Control
+- Uso predominante de lógica combinacional para evitar latencias innecesarias.
+- Elementos secuenciales solo donde es estrictamente necesario:
+  - PC
+  - Banco de registros
+  - Registros pipeline (si aplica)
+
+El diseño es completamente sintetizable y compatible con FPGA (Artix-7), donde:
+
+- Registros → Flip-flops
+- ROM/RAM → BRAM
+- Lógica combinacional → LUTs
+
+# Módulo – Periférico ADC / XADC
+
+---
+
+## Nombre del módulo
+
+`adc_peripheral` — Wrapper del bloque IP XADC Wizard de Vivado, expuesto como periférico mapeado en memoria de 32 bits.
+
+---
+
+## Objetivo
+
+Servir de puente entre:
+
+- El bus del CPU (registros de control/estado/dato)
+- El bloque analógico XADC embebido en el Artix-7
+
+Este módulo **no implementa el ADC desde cero**.  
+Instancia el IP `xadc_wiz_0` generado por Vivado y gestiona su protocolo de handshake:
+
+- Inicio de conversión  
+- Espera de fin  
+- Lectura de dato válido  
+
+Todo esto hacia el CPU.
+
+---
+
+## IP Catalog vs Diseño Propio
+
+Esta es la diferencia clave respecto al PWM.
+
+- El **XADC** es un bloque analógico-digital físico dentro del silicio del Artix-7.
+- Vivado lo expone mediante el **XADC Wizard IP**.
+- Ese IP genera un wrapper digital con interfaz **DRP (Dynamic Reconfiguration Port)**.
+
+Nuestro trabajo:
+
+Diseñar un **segundo wrapper** que convierta la interfaz DRP en registros mapeados en memoria accesibles por el RISC-V.
+
+Cadena completa desde el pin físico hasta el CPU:
+
+[Imagen]
+
+---
+
+## Entradas y Salidas del Módulo
+
+| Señal | Dir | Ancho | Descripción |
+|--------|-----|--------|-------------|
+| `clk_i` | in | 1 | Reloj del sistema (100 MHz) |
+| `rst_i` | in | 1 | Reset síncrono |
+| `addr_i` | in | 32 | Dirección bus de datos |
+| `wdata_i` | in | 32 | Dato a escribir |
+| `we_i` | in | 1 | Write enable |
+| `cs_i` | in | 1 | Chip select |
+| `adc_start_ext_i` | in | 1 | Disparo externo de conversión |
+| `pwm_trigger_i` | in | 1 | Disparo automático desde PWM |
+| `rdata_o` | out | 32 | Dato leído por CPU |
+
+---
+
+## Relación con Otros Módulos
+
+El `adc_peripheral` es el único módulo con frontera analógica.
+
+- Recibe señal analógica desde divisor resistivo conectado a `VAUXP/VAUXN`.
+- Instancia el IP XADC para realizar la conversión.
+- Entrega el resultado digital (`adc_data[11:0]`) al CPU.
+
+Además:
+
+- `pwm_trigger_i` proviene del `pwm_peripheral`
+- Permite sincronizar muestreo con el ciclo de conmutación
+
+---
+
+# Submódulos Internos
+
+---
+
+## Submódulo – IP XADC Wizard y la Interfaz DRP
+
+Antes de diseñar el wrapper, se debe entender la interfaz del IP generado por Vivado.
+
+Este bloque **no es código propio**, es hardware predefinido.
+
+Interfaz relevante: **DRP (Dynamic Reconfiguration Port)**
+
+[Imagen]
+
+Características clave:
+
+- Dirección DRP `7'h10` → Registro del canal AUX0
+- `0x11` → AUX1, etc.
+- Fin de conversión indicado por pulso `eoc_out`
+- Lectura se realiza mediante transacción DRP inmediatamente después de `eoc_out`
+
+---
+
+## Submódulo – Registros Mapeados en Memoria del ADC
+
+[Imagen]
+
+Estos registros permiten al CPU:
+
+- Habilitar disparos
+- Iniciar conversión
+- Leer resultado digital
+- Consultar flags de estado
+
+---
+
+## Submódulo – FSM de Control DRP (Corazón del Wrapper)
+
+Esta es la parte diseñada manualmente.
+
+[Imagen]
+
+### Función
+
+La FSM implementa el protocolo requerido por el IP XADC:
+
+1. Esperar trigger
+2. Iniciar conversión
+3. Esperar `eoc_out`
+4. Ejecutar lectura DRP
+5. Capturar dato
+6. Actualizar registro de estado
+
+La FSM traduce el protocolo DRP en una interfaz simple tipo:
+
+- `start`
+- `data_ready`
+- `data_out`
+
+para el CPU.
+
+---
+
+## Submódulo – Lógica de Disparo (Trigger MUX)
+
+Tres fuentes de disparo:
+
+- Bit de control por CPU
+- `adc_start_ext_i`
+- `pwm_trigger_i`
+
+Se combinan mediante lógica OR, habilitadas individualmente por bits de control.
+
+[Imagen]
+
+---
+
+# Diseño
+
+Gran diferencia respecto a otros módulos:
+
+No se diseñan compuertas para el ADC en sí.  
+El ADC ya existe físicamente en el chip.
+
+Lo que se diseña es:
+
+- Wrapper digital
+- FSM de control
+- Registros mapeados
+- Lógica de disparo
+
+---
+
+# Escalamiento Analógico (Diseño Crítico)
+
+El XADC del Artix-7 acepta máximo **1.0 V** en entradas auxiliares.
+
+Si:
+
+- `Vout = 24 V`
+
+Se requiere divisor resistivo:
+`Vdiv = Vout × R2 / (R1 + R2)V`
+
+
+Ejemplo:
+
+- `R1 = 23 kΩ`
+- `R2 = 1 kΩ`
+
+Entonces:
+
+`Vdiv = 24 × (1 / 24) = 1.0 V`
+
+Valor límite seguro para el XADC.
+
+En software:
+
+El CPU multiplica el resultado digital por 24 para reconstruir `Vout`.
+
+---
+
+# Resumen Conceptual
+
+El `adc_peripheral`:
+
+- Conecta mundo analógico ↔ mundo digital
+- Traduce protocolo DRP ↔ registros mapeados en memoria
+- Permite sincronización con PWM
+- Mantiene separación clara entre hardware físico (IP) y lógica digital personalizada
 
 
 
