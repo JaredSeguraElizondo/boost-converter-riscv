@@ -1352,4 +1352,96 @@ Salidas del módulo y su origen
 
 ---
 
+# Módulo — GPIO (botón)
+
+Es la ventana de entrada física del usuario.
+
+---
+
+## Nombre del módulo
+
+**gpio_peripheral** — Periférico de entrada digital de propósito general, mapeado en memoria, para lectura del estado de botones físicos de la FPGA.
+
+---
+
+## Objetivo
+
+Leer el estado de uno o más botones físicos de la tarjeta FPGA y exponerlo como un registro de 32 bits accesible por el CPU.
+
+Adicionalmente, detectar el flanco de subida del botón para generar un evento de un solo pulso que el software pueda interpretar correctamente, evitando múltiples lecturas por un solo press.
+
+---
+
+## Entradas y salidas
+
+| Señal   | Dir | Ancho | Descripción |
+|----------|-----|--------|-------------|
+| clk_i    | in  | 1      | Reloj del sistema |
+| rst_i    | in  | 1      | Reset síncrono |
+| addr_i   | in  | 31     | Dirección del bus de datos |
+| we_i     | in  | 1      | Write enable |
+| cs_i     | in  | 1      | Chip select |
+| btn_i    | in  | 1      | Pin físico del botón (activo en alto) |
+| rdata_o  | out | 32     | Dato leído por el CPU |
+
+---
+
+## Relación con otros módulos
+
+El CPU lee periódicamente (polling) el registro de estado del GPIO en:`0x0001_0130`
+
+
+Cuando detecta un evento de botón presionado, ejecuta la rutina de exportación UART que recorre el buffer circular de muestras y las transmite por UART.
+
+El GPIO no genera interrupciones — el software realiza polling activo.
+
+---
+
+# Funcionamiento y diseño — Anti-rebote y detección de flanco
+
+El botón físico produce ruido mecánico (*bouncing*) durante aproximadamente 5–20 ms.  
+
+Sin filtrado, el CPU detectaría múltiples flancos por un solo press.
+
+Para evitarlo se implementan dos etapas:
+
+1. Filtro anti-rebote basado en contador.
+2. Detector de flanco que genera un pulso limpio de 1 ciclo.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/GPIO.png" width="430">
+
+---
+
+## Diseño — Detección de flanco
+
+La detección de flanco es puramente combinacional:`btn_posedge = btn_clean AND NOT btn_prev- `
+
+- `btn_clean` es la señal filtrada.
+- `btn_prev` es la versión registrada del ciclo anterior.btn_clean` es la señal filtrada.
+- `btn_prev` es la versión registrada del ciclo anterior.
+
+---
+
+## Registro de evento (latch por software)
+
+El evento se acumula mediante:
+`btn_edge_reg <= btn_edge_reg OR btn_posedge`
+
+Esto permite que el CPU no pierda el evento aunque no lea exactamente en el ciclo del pulso.
+
+El bit se limpia cuando el CPU escribe un `1` en el bit 0 del registro (clear-on-write-1).
+
+---
+
+## Diseño — Filtro anti-rebote
+
+El filtro utiliza un contador que verifica que el botón permanezca estable durante un tiempo mínimo antes de aceptar el cambio.
+
+Para un sistema a 100 MHz y un tiempo de estabilización de 5 ms: `100 MHz × 5 ms = 500 000 ciclos`
+
+Se requiere entonces un contador capaz de contar hasta 500 000.
+
+Número de bits necesarios:`ceil(log2(500000)) = 19 bits`
+
+
 
