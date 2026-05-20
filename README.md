@@ -694,7 +694,7 @@ Es el camino crítico del **Instruction Fetch** del pipeline.
 Alimenta directamente la primera etapa del pipeline (IF).  
 La rapidez de esta lectura afecta el periodo máximo de reloj.
 
-**[Imagen]**
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ROM3.png?ref_type=heads" width="430">
 
 ### Funcionamiento
 
@@ -811,21 +811,9 @@ El PC se actualiza:
 
 ---
 
-## Arquitectura interna del CPU
-
-[Imagen]
-
----
-
-# Submódulos del CPU (Nivel de Diseño)
-
-[Imagen]
-
----
-
 ## Submódulo – Program Counter (PC)
 
-[Imagen]
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/CPU1.png" width="450">
 
 ### Diseño del PC
 
@@ -848,8 +836,7 @@ En cada flanco positivo:
 
 ## Submódulo – Instruction Decoder
 
-[Imagen]
-
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/CPU2.png" width="430">
 ### Diseño
 
 Lógica puramente combinacional.
@@ -871,7 +858,7 @@ Los inmediatos se reconstruyen según tipo de instrucción:
 
 ## Submódulo – Unidad de Control
 
-[Imagen]
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/CPU3.png" width="450">
 
 ### Diseño
 
@@ -891,7 +878,7 @@ Es obligatorio:
 
 ## Submódulo – ALU de 32 bits
 
-[Imagen]
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/CPU4.png" width="430">
 
 ### Diseño de la ALU
 
@@ -920,7 +907,7 @@ Selección final:
 
 ## Submódulo – Banco de Registros
 
-[Imagen]
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/CPU5.png" width="450">
 
 ### Diseño
 
@@ -934,7 +921,7 @@ Selección final:
 
 ## Submódulo – Sign Extender
 
-[Imagen]
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/CPU6.png" width="430">
 
 ### Diseño
 
@@ -956,7 +943,7 @@ Replica el bit más significativo para extensión de signo.
 
 Este módulo no está dentro del CPU, pero es parte central del sistema.
 
-[Imagen]
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/CPU7.png" width="430">
 
 ### Función
 
@@ -976,23 +963,7 @@ Genera:
 
 ---
 
-# Justificación General de Diseño
 
-- Arquitectura modular → facilita verificación y síntesis.
-- Separación clara entre:
-  - Datapath
-  - Control
-- Uso predominante de lógica combinacional para evitar latencias innecesarias.
-- Elementos secuenciales solo donde es estrictamente necesario:
-  - PC
-  - Banco de registros
-  - Registros pipeline (si aplica)
-
-El diseño es completamente sintetizable y compatible con FPGA (Artix-7), donde:
-
-- Registros → Flip-flops
-- ROM/RAM → BRAM
-- Lógica combinacional → LUTs
 
 # Módulo – Periférico ADC / XADC
 
@@ -1026,17 +997,11 @@ Todo esto hacia el CPU.
 
 Esta es la diferencia clave respecto al PWM.
 
-- El **XADC** es un bloque analógico-digital físico dentro del silicio del Artix-7.
+- El **XADC** es un bloque analógico-digital físico dentro de la FPGA.
 - Vivado lo expone mediante el **XADC Wizard IP**.
 - Ese IP genera un wrapper digital con interfaz **DRP (Dynamic Reconfiguration Port)**.
 
-Nuestro trabajo:
-
-Diseñar un **segundo wrapper** que convierta la interfaz DRP en registros mapeados en memoria accesibles por el RISC-V.
-
-Cadena completa desde el pin físico hasta el CPU:
-
-[Imagen]
+Se diseñó un **segundo wrapper** que convierte la interfaz DRP en registros mapeados en memoria accesibles por el RISC-V.
 
 ---
 
@@ -1083,8 +1048,6 @@ Este bloque **no es código propio**, es hardware predefinido.
 
 Interfaz relevante: **DRP (Dynamic Reconfiguration Port)**
 
-[Imagen]
-
 Características clave:
 
 - Dirección DRP `7'h10` → Registro del canal AUX0
@@ -1096,10 +1059,28 @@ Características clave:
 
 ## Submódulo – Registros Mapeados en Memoria del ADC
 
-[Imagen]
+**Registro 0 - ctrl/estado**
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ADC1.png" width="430">
+
+**Registro 1 - dato convertido**
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ADC2.png" width="430">
+
+**start [0] W1P:**
+Write-1-to-Pulse. Escribir 1 dispara 1 conversión. Se auto-limpia al siguiente ciclo.
+
+**new_data [1] RW1C:**
+Se pone a 1 cuando llega dato nuevo. CPU lo limpia escribiendo 1 (Write-1-to-Clear).
+
+**ext_start_en [2]:**
+Habilita el pin adc_start_ext_i como fuente de disparo externo.
+
+**busy [3] RO:**
+Refleja busy_out del XADC. CPU puede pollear para saber si conversión terminó.
+
+**pwm_trig_en [4]:**
+Habilita pwm_trigger_i como fuente de disparo automático sincronizado.
 
 Estos registros permiten al CPU:
-
 - Habilitar disparos
 - Iniciar conversión
 - Leer resultado digital
@@ -1111,7 +1092,7 @@ Estos registros permiten al CPU:
 
 Esta es la parte diseñada manualmente.
 
-[Imagen]
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ADC3.png" width="430">
 
 ### Función
 
@@ -1144,7 +1125,12 @@ Tres fuentes de disparo:
 
 Se combinan mediante lógica OR, habilitadas individualmente por bits de control.
 
-[Imagen]
+**Trigger mux y diagrama temporal**
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ADC4.png" width="430">
+
+**Diagrama temporal - ciclo de conversión completo**
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/ADC5.png" width="430">
 
 ---
 
@@ -1166,7 +1152,7 @@ Lo que se diseña es:
 
 # Escalamiento Analógico (Diseño Crítico)
 
-El XADC del Artix-7 acepta máximo **1.0 V** en entradas auxiliares.
+El XADC de la FPGA acepta máximo **1.0 V** en entradas auxiliares.
 
 Si:
 
@@ -1193,15 +1179,177 @@ El CPU multiplica el resultado digital por 24 para reconstruir `Vout`.
 
 ---
 
-# Resumen Conceptual
+# Módulo — Periférico PWM
 
-El `adc_peripheral`:
+## Nombre del módulo
 
-- Conecta mundo analógico ↔ mundo digital
-- Traduce protocolo DRP ↔ registros mapeados en memoria
-- Permite sincronización con PWM
-- Mantiene separación clara entre hardware físico (IP) y lógica digital personalizada
+**pwm_peripheral** — Generador PWM mapeado en memoria, 32 bits, con interfaz de registros de control/estado y ciclo de trabajo.
+
+---
+
+## Objetivo
+
+Generar una señal PWM de frecuencia y ciclo de trabajo programables por software, exponiendo dos registros de 32 bits accesibles desde el CPU.  
+
+Además, produce una señal de sincronización `pwm_trigger_o` al inicio de cada período, usada para disparar conversiones ADC alineadas con la conmutación.
+
+---
+
+## Entradas
+
+| Señal   | Ancho | Descripción |
+|----------|--------|-------------|
+| clk_i    | 1      | Reloj del sistema (100 MHz) |
+| rst_i    | 1      | Reset síncrono activo alto |
+| addr_i   | 32     | Dirección del bus de datos |
+| wdata_i  | 32     | Dato a escribir (desde el CPU) |
+| we_i     | 1      | Write enable del bus |
+| cs_i     | 1      | Chip select (desde el address decoder) |
+
+---
+
+## Salidas
+
+| Señal          | Ancho | Descripción |
+|----------------|--------|-------------|
+| rdata_o        | 32     | Dato leído por el CPU |
+| pwm_out_o      | 1      | Señal PWM de potencia hacia el gate driver |
+| pwm_trigger_o  | 1      | Pulso de sincronización al inicio del período PWM |
+
+---
+
+## Relación con otros módulos
+
+Recibe escrituras del CPU (configuración de frecuencia, enable y duty cycle).  
+
+Su salida `pwm_out_o` controla el MOSFET del convertidor boost a través del gate driver.  
+
+La señal `pwm_trigger_o` va al periférico ADC/XADC para alinear el muestreo con el inicio del período PWM, eliminando el jitter entre medición y actuación.
+
+---
+
+## Funcionamiento
+
+Internamente contiene un contador libre que cuenta de 0 hasta un valor `PERIOD-1` determinado por `freq_sel`.
+
+Cuando el contador es menor que el valor de comparación: `(duty_pct × PERIOD) / 100`
 
 
+la salida PWM es alta; en caso contrario, es baja.
+
+El trigger se genera como un pulso de 1 ciclo cuando el contador llega a 0 (inicio de período).
+
+---
+
+# Diseño — Justificación de frecuencias
+
+Para un reloj de 100 MHz y una frecuencia de conmutación fsw > 20 kHz, se usan tres valores de período:
+
+| freq_sel | Frecuencia | PERIOD (cuentas) | Resolución duty |
+|-----------|------------|------------------|-----------------|
+| 2'b00     | 25 kHz     | 4000             | 0.025 % / paso |
+| 2'b01     | 50 kHz     | 2000             | 0.05 % / paso  |
+| 2'b10     | 100 kHz    | 1000             | 0.1 % / paso   |
+
+La resolución del duty se calcula como:`round(duty_pct × PERIOD / 100)`
+
+
+saturando el resultado al rango `[0, PERIOD]`.
+
+---
+
+# Submódulo — Registros mapeados en memoria  
+(bus interface + register file)
+
+Diseño de los dos registros de 32 bits y su decodificación de dirección.
+
+---
+
+## Registro 0 — ctrl/estado
+
+Dirección: `0x0001_0100`  
+Offset: `0x00`
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/PWM1.png" width="430">
+
+- `running` → RO, refleja el estado del contador activo.
+
+---
+
+## Registro 1 — Ciclo de trabajo (duty)
+
+Dirección: `0x0001_0104`  
+Offset: `0x04`
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/PWM2.png" width="430">
+
+---
+
+# Submódulo 2 — Contador libre de período
+
+Este es el corazón del generador PWM.  
+
+Es un contador que cuenta de `0` a `PERIOD-1` y vuelve a `0`.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/PWM3.png" width="500">
+
+### Diseño del contador
+
+- Registro de 13 bits (necesario para representar hasta 4000).
+- Sumador de incremento.
+- Comparador contra `PERIOD-1`.
+- MUX de selección (wrap o incremento).
+
+En cada flanco de reloj:
+
+- Si `cnt == PERIOD-1` → se carga `0`.
+- Si no → se carga `cnt + 1`.
+- Si `rst` está activo → se carga `0`.
+- Si `enable = 0` → el contador se congela.
+
+---
+
+# Submódulo — Comparador de duty cycle y compuerta de salida
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/PWM4.png" width="700">
+
+---
+
+# Submódulo — Generador de trigger y máquina de estados del PWM
+
+El trigger y la señal `running` se implementan con lógica adicional.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/doc/Imagenes%20Documentaci%C3%B3n/PWM5.png" width="700">
+
+El trigger es puramente combinacional: es 1 solo cuando cnt==0 AND enable==1.
+Como cnt==0 dura exactamente 1 ciclo de reloj, el trigger es naturalmente un pulso de 1 ciclo.
+No necesita registro adicional: la duración está garantizada por el ciclo del contador.
+
+Salidas del módulo y su origen
+
+`pwm_out_o`
+= (cnt < threshold) AND enable
+`pwm_trigger_o`
+= (cnt == 0) AND enable
+`running (bit 3)`
+= enable (refleja estado activo del generador)
+`rdata_o`
+= {28'b0, running, freq_sel, enable} (addr==0x100)
+
+---
+
+# Diseño — Señales internas
+
+| Señal          | Tipo            | Ecuación / Descripción |
+|----------------|----------------|------------------------|
+| cnt_next       | Combinacional  | `(cnt == PERIOD-1) ? 0 : cnt + 1` |
+| threshold      | Combinacional  | `(duty_pct * PERIOD) / 100` (la división por 100 se sintetiza como shifts + sumas) |
+| pwm_raw        | Combinacional  | `cnt < threshold` (restador, bit de borrow) |
+| pwm_out_o      | Combinacional  | `pwm_raw AND enable` |
+| pwm_trigger_o  | Combinacional  | `(cnt == 0) AND enable` — NOR de 13 bits del contador |
+| running        | Registro (RO)  | `enable` — registrado para lectura coherente |
+| duty_pct       | Registro (R/W) | Saturación: `wdata[6:0] > 100 ? 100 : wdata[6:0]` |
+
+---
 
 
