@@ -283,6 +283,31 @@ Periférico que encapsula el IP XADC de Xilinx mediante su puerto DRP (Dynamic R
 | `dwe_o` | salida | 1 | Write Enable DRP (siempre `0`, solo lectura) |
 | `di_o` | salida | 16 | Dato de entrada DRP (no usado) |
 
+
+
+## 4. risc_v_cpu
+
+Núcleo del procesador RV32I de 32 bits. Implementa el subconjunto del proyecto (`lw`, `sw`, instrucciones aritméticas y lógicas con inmediato y registro, shifts, branches, `jal` y `jalr`) bajo una arquitectura Harvard con buses externos independientes para programa y datos. Internamente se organiza en cinco etapas: Fetch, Decode, Execute, Memory y Writeback.
+
+### Puertos
+
+| Puerto | Dirección | Ancho | Descripción |
+|---|---|---|---|
+| `clk_i` | entrada | 1 | Reloj del sistema (100 MHz) |
+| `reset_i` | entrada | 1 | Reset síncrono activo alto |
+| `ProgAddress_o` | salida | 32 | Dirección de la siguiente instrucción |
+| `ProgIn_i` | entrada | 32 | Instrucción leída desde la ROM |
+| `DataAddress_o` | salida | 32 | Dirección del bus de datos |
+| `DataOut_o` | salida | 32 | Dato a escribir en RAM o periférico |
+| `DataIn_i` | entrada | 32 | Dato leído desde RAM o periférico |
+| `we_o` | salida | 1 | Habilitación de escritura del bus de datos |
+
+### Notas de Diseño
+
+- El CPU expone los buses Harvard al exterior, lo que permite conectar ROM, RAM y periféricos mediante el decodificador central.
+- El reset reinicia el PC a `0x0000_0000`, donde inicia la ejecución del programa.
+- Los submódulos internos (PC, instruction decoder, ALU, banco de registros, sign extender y unidad de control) se documentan en detalle en `/doc`.
+
 #### Mapa de Registros
 
 | `addr_i` | Acceso | Bits | Descripción |
@@ -298,11 +323,123 @@ Periférico que encapsula el IP XADC de Xilinx mediante su puerto DRP (Dynamic R
 
 La FSM tiene tres estados: `IDLE` → `READ_DRP` → `WAIT_DRDY` → `IDLE`. Espera el pulso `eoc_i` para iniciar la lectura DRP, habilita `den_o` por un ciclo y aguarda `drdy_i` para capturar el resultado.
 
-#### Notas de Diseño
+## 6. data_memory
 
-- Canal ADC configurado en `daddr_o = 7'h16` (VAUX6, pines J3/K3 de la Basys 3).
-- El XADC entrega el dato alineado a la izquierda en 16 bits; el módulo extrae los 12 MSB (`do_i[15:4]`).
-- La bandera `new_data` puede limpiarse por software (RW1C en offset `0x0`) o automáticamente al leer el offset `0x4`.
+Memoria RAM de 1024 palabras de 32 bits para almacenamiento de datos del programa. Implementa lectura combinacional y escritura síncrona habilitada por `WE`. El reset síncrono inicializa las 1024 posiciones en cero y tiene prioridad sobre la escritura.
+
+### Puertos
+
+| Puerto | Dirección | Ancho | Descripción |
+|---|---|---|---|
+| `clk` | entrada | 1 | Reloj del sistema (100 MHz) |
+| `reset` | entrada | 1 | Reset síncrono activo alto |
+| `WE` | entrada | 1 | Write enable |
+| `A` | entrada | 32 | Dirección de la palabra |
+| `WD` | entrada | 32 | Dato a escribir |
+| `RD` | salida | 32 | Dato leído (combinacional) |
+
+### Tabla de comportamiento
+
+| reset | WE | Acción |
+|---|---|---|
+| 1 | X | `mem[todos] <= 0` |
+| 0 | 1 | `mem[A[11:2]] <= WD` |
+| 0 | 0 | Sin cambio |
+
+## 7. pwm_peripheral
+
+Periférico generador de PWM mapeado en memoria. Expone dos registros de 32 bits accesibles desde el CPU: uno de control/estado y otro de ciclo de trabajo. Produce además una señal de sincronización `pwm_trigger_o` al inicio de cada periodo, utilizada por el ADC para alinear las conversiones con la conmutación del convertidor.
+
+### Puertos
+
+| Puerto | Dirección | Ancho | Descripción |
+|---|---|---|---|
+| `clk_i` | entrada | 1 | Reloj del sistema (100 MHz) |
+| `rst_i` | entrada | 1 | Reset síncrono activo alto |
+| `addr_i` | entrada | 4 | Offset del registro a acceder |
+| `wdata_i` | entrada | 32 | Dato a escribir desde el CPU |
+| `we_i` | entrada | 1 | Habilitación de escritura MMIO |
+| `cs_i` | entrada | 1 | Chip select desde el address decoder |
+| `rdata_o` | salida | 32 | Dato leído por el CPU |
+| `pwm_out_o` | salida | 1 | Señal PWM hacia el gate driver |
+| `pwm_trigger_o` | salida | 1 | Pulso de sincronización al ADC |
+
+### Mapa de Registros
+
+| Offset | Bits | Acceso | Descripción |
+|---|---|---|---|
+| `0x00` | [0] | R/W | `enable`: habilita la generación PWM |
+| `0x00` | [2:1] | R/W | `freq_sel`: selección de frecuencia (3 valores válidos) |
+| `0x00` | [3] | R | `running`: refleja que el generador está activo |
+| `0x04` | [6:0] | R/W | `duty_pct`: ciclo de trabajo en porcentaje (0 a 100) |
+
+### Frecuencias configurables
+
+Para un reloj base de 100 MHz se eligieron tres frecuencias por encima del umbral audible:
+
+| `freq_sel` | Frecuencia | PERIOD (cuentas) |
+|---|---|---|
+| `2'b00` | 25 kHz | 4000 |
+| `2'b01` | 50 kHz | 2000 |
+| `2'b10` | 100 kHz | 1000 |
+
+### Notas de Diseño
+
+- El contador interno cuenta de 0 hasta `PERIOD-1` y vuelve a 0. Si `enable=0` el contador se congela.
+- La salida es alta mientras `cnt < threshold`, donde `threshold = (duty_pct * PERIOD) / 100`.
+- El trigger se genera combinacionalmente como `(cnt == 0) AND enable`, garantizando un pulso de exactamente un ciclo de reloj al inicio de cada periodo.
+- Cualquier escritura de `duty_pct` mayor a 100 se satura al valor 100.
+
+### Simulación — pwm_peripheral
+
+El testbench valida dos comportamientos críticos del periférico: el cambio de frecuencia con ciclo de trabajo fijo y la variación del ciclo de trabajo a frecuencia constante.
+
+**Test 1: cambio de frecuencia (ciclo de trabajo fijo en 50%)**
+
+![Cambio de frecuencia PWM](https://gitlab.com/grupo034420017/proyecto03/-/raw/main/Imagenes_TestBenches/tb_PWM1.png?ref_type=heads)
+
+Con `duty_pct = 50` se recorren los tres valores válidos de `freq_sel`: 0 (25 kHz, periodo de 40 µs), 1 (50 kHz, periodo de 20 µs) y 2 (100 kHz, periodo de 10 µs). La señal `pwm_out` cambia su periodo entre cada región sin perder la simetría del 50% de ciclo de trabajo, lo que confirma que el contador se reinicia correctamente al cambiar el valor de `PERIOD` y que el cálculo del umbral se reescala al nuevo periodo en cada cambio.
+
+**Test 2: variación del ciclo de trabajo (frecuencia fija en 50 kHz)**
+
+![Variación de duty cycle PWM](https://gitlab.com/grupo034420017/proyecto03/-/raw/main/Imagenes_TestBenches/tb_PWM2.png?ref_type=heads)
+
+Se mantiene `freq_sel = 2'b01` (50 kHz) y se incrementa `duty_pct` en pasos de 5%: 45, 50, 55, 60. La señal `pwm_out` muestra cómo el ancho del pulso alto crece proporcionalmente mientras el periodo permanece constante en 20 µs. Los pulsos de `pwm_trig` aparecen una sola vez al inicio de cada periodo, confirmando la sincronización de un ciclo. Esto verifica el cálculo correcto del umbral `threshold = (duty_pct * PERIOD) / 100`.
+
+### Simulación — Microcontrolador completo
+
+El testbench integra el CPU con la ROM, la RAM y un modelo simplificado de los periféricos (mocks). El programa cargado en la ROM corresponde al lazo de control del convertidor: inicializa los periféricos, lee el ADC, calcula la actualización del ciclo de trabajo y la escribe en el PWM, y refresca el dato en el VGA. Los mocks devuelven valores fijos para que el CPU pueda recorrer el programa completo sin requerir hardware real:
+
+- ADC: `new_data = 1` siempre, valor de conversión `0x800` (2048).
+- GPIO: botón siempre presionado.
+- UART: `tx_busy = 0` siempre.
+
+![Forma de onda del CPU integrado](https://gitlab.com/grupo034420017/proyecto03/-/raw/main/Imagenes_TestBenches/tb_CPU.jpeg)
+
+Tras liberar el reset, `ProgAddress` se incrementa en 4 cada ciclo, confirmando el avance secuencial correcto del PC. Las primeras instrucciones (PC `0x00` a `0x44`) cargan constantes en los registros y no generan escrituras en el bus (`we_cpu = 0`), lo que se observa en `rdata_ram` y `rdata_periph` estables en cero. La primera activación de `we_cpu` ocurre alrededor de los 220 ns, correspondiente a la primera escritura sobre un periférico.
+
+El monitor del testbench filtra las escrituras a periféricos y produce la siguiente traza ordenada por PC:
+
+| PC | Acción | Significado |
+|---|---|---|
+| `0x4c` | `PWM_CTRL <= 0x01` | Habilita la generación PWM |
+| `0x54` | `PWM_DUTY <= 50%` | Ciclo de trabajo inicial |
+| `0x58` | `ADC_CTRL <= 0x00` | Configuración del ADC |
+| `0x60` | `VGA_CTRL <= 0x01` | Habilita visualización VGA |
+| `0x68` | `ADC_CTRL <= 0x01` | Dispara primera conversión |
+| `0x74` | lectura `ADC_DATA = 0x800` | Captura del valor convertido (mock) |
+| `0x114` | `PWM_DUTY <= 51%` | Actualización del duty por el controlador integral |
+| `0x134` | `VGA_DATA <= 236` | Envío de la muestra escalada al VGA |
+
+**pwm_peripheral — Base: PWM_BASE**
+
+| Offset | Campo | R/W | Descripción |
+|---|---|---|---|
+| +0x0 [0] | enable | R/W | Habilita la generación PWM |
+| +0x0 [2:1] | freq_sel | R/W | Selección de frecuencia (3 valores válidos) |
+| +0x0 [3] | running | R | Generador activo |
+| +0x4 [6:0] | duty_pct | R/W | Ciclo de trabajo (0 a 100, saturado) |
+
 
 ---
 
