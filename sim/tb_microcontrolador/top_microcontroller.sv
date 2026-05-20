@@ -1,13 +1,4 @@
-// ============================================================================
-// Modulo: top_microcontroller
-// Proyecto 3 -- Control digital RISC-V / Convertidor Boost
-// Curso: EL3313 Taller de Diseno Digital
-// ============================================================================
-// [FIX CDC] El VGA ahora corre en clk_cpu (100 MHz) con pixel enable interno.
-//   La salida clk_out1 (25 MHz) del PLL ya no se usa para VGA.
-//   Si se desea, se puede reconfigurar el PLL para tener solo la salida
-//   de 16 MHz (UART) y eliminar la de 25 MHz.
-// ============================================================================
+
 
 module top_microcontroller (
     input  logic        clk_100mhz,

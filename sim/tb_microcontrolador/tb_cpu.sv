@@ -26,7 +26,21 @@ module tb_cpu;
     logic [31:0] DataOut;
     logic [31:0] DataIn;
     logic        we_cpu;
+    // ── Relojes y reset ──
+    logic        clk;
+    logic        reset;
 
+    // ── Bus de instrucciones ──
+    logic [31:0] ProgAddress;
+    logic [31:0] ProgData;
+
+    // ── Bus de datos ──
+    logic [31:0] DataAddress;
+    logic [31:0] DataOut;
+    logic [31:0] DataIn;
+    logic        we_cpu;
+
+    // ── Instancia del CPU ──
     // ── Instancia del CPU ──
     cpu uut (
         .clk          (clk),
@@ -130,6 +144,7 @@ module tb_cpu;
     // ── Secuencia principal ──
     initial begin
         $dumpfile("tb_cpu_proyecto3.vcd");
+        $dumpfile("tb_cpu_proyecto3.vcd");
         $dumpvars(0, tb_cpu);
 
         reset = 1;
@@ -138,11 +153,21 @@ module tb_cpu;
         $display("    GPIO mock: boton siempre presionado");
         $display("    UART mock: tx_busy=0 (sin espera)");
         $display("============================================");
+        $display("=== Inicio simulacion CPU Proyecto 3 ===");
+        $display("    ADC mock: new_data=1, value=2048");
+        $display("    GPIO mock: boton siempre presionado");
+        $display("    UART mock: tx_busy=0 (sin espera)");
+        $display("============================================");
 
+        #30;
         #30;
         reset = 0;
         $display("[%7t ns] Reset liberado. CPU corriendo.", $time);
+        $display("[%7t ns] Reset liberado. CPU corriendo.", $time);
 
+        // Dejar correr suficiente para ver inicializacion + 1 envio UART
+        // Con mock de perifericos rapidos, el ciclo completo toma ~500 ciclos
+        #10000;
         // Dejar correr suficiente para ver inicializacion + 1 envio UART
         // Con mock de perifericos rapidos, el ciclo completo toma ~500 ciclos
         #10000;
@@ -150,8 +175,16 @@ module tb_cpu;
         $display("============================================");
         $display("    Simulacion finalizada.");
         $finish;
+        $display("============================================");
+        $display("    Simulacion finalizada.");
+        $finish;
     end
 
+    // ── Monitor de PC y WB cada ciclo negativo ──
+    always_ff @(negedge clk) begin
+        if (!reset)
+            $display("[%7t ns] PC=0x%08h  DataAddr=0x%08h  DataIn=0x%08h  we=%b",
+                     $time, ProgAddress, DataAddress, DataIn, we_cpu);
     // ── Monitor de PC y WB cada ciclo negativo ──
     always_ff @(negedge clk) begin
         if (!reset)

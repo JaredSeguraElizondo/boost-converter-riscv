@@ -1,9 +1,4 @@
-// ============================================================================
-// tb_register_id_ex_proyecto3.sv
-// Cambios respecto al TB anterior:
-//   [FIX1] Agrega funct3D/funct7D → funct3E/funct7E (propagacion a ALU)
-//   [FIX5] Agrega SubD → SubE (señal de resta R-type)
-// ============================================================================
+
 
 `timescale 1ns / 1ps
 
