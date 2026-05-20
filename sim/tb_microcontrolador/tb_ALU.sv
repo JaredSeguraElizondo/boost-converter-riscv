@@ -1,11 +1,3 @@
-// ============================================================================
-// tb_ALU_proyecto3.sv
-// Cambios respecto al TB anterior:
-//   [FIX5] Agrega puerto Sub a la instancia del DUT
-//   [NEW]  Agrega caso SRAI (usado en assembly: srai x6, x4, 10)
-//   [NEW]  Agrega caso SUB con Sub=1 (usado en: sub x2, x1, x7)
-// ============================================================================
-
 `timescale 1ns / 1ps
 
 module tb_ALU_proyecto3;
