@@ -3,6 +3,7 @@
 // VGA con puertos viejos (clk_100mhz, rst, clk_25mhz).
 // Reset SINCRONIZADO al clk_cpu via pipeline de 3 etapas para evitar
 // problemas de placement por fanout alto del reset asincrono.
+// [FIX] Agregado sw_i[1:0] para control de frecuencia PWM via switches
 // ============================================================================
 
 module top_microcontroller (
@@ -19,6 +20,7 @@ module top_microcontroller (
     output logic [3:0]  vga_grn_o,
     output logic [3:0]  vga_blu_o,
     input  logic        btn_send,
+    input  logic [1:0]  sw_i,      // [FIX] switches para freq_sel del PWM
     output logic [15:0] led
 );
 
@@ -42,8 +44,6 @@ module top_microcontroller (
 
     // ========================================================================
     // RESET SINCRONIZADO (pipeline de 3 etapas + ASYNC_REG)
-    // Esto evita que Vivado intente meter el reset por una BUFG y
-    // resuelve problemas de placement por high fanout.
     // ========================================================================
     (* ASYNC_REG = "TRUE" *) logic [2:0] rst_sync_pipe;
     always_ff @(posedge clk_cpu) begin
@@ -248,7 +248,7 @@ module top_microcontroller (
         .RsTx            (RsTx)
     );
 
-    // ----- VGA con puertos VIEJOS -----
+    // ----- VGA -----
     vga_mmio_wrapper u_vga (
         .clk_100mhz (clk_cpu),
         .rst        (rst_sync),
@@ -264,11 +264,13 @@ module top_microcontroller (
         .vga_b      (vga_blu_o)
     );
 
+    // [FIX] GPIO con botón + switches
     gpio_peripheral u_gpio (
         .clk_i   (clk_cpu),
         .rst_i   (rst_sync),
         .rdata_o (rdata_gpio),
-        .boton_i (btn_send)
+        .boton_i (btn_send),
+        .sw_i    (sw_i)
     );
 
 endmodule

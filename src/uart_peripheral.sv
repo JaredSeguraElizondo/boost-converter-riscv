@@ -39,6 +39,9 @@ module uart_peripheral (
         .tx          (RsTx)
     );
 
+    // Sincronizador de 2 etapas: reg_send (dominio CPU) → dominio UART
+    // reg_send se mantiene alto hasta que sync_send[1] lo confirma,
+    // garantizando captura aunque clk_uart sea más lenta que clk_cpu.
     logic [1:0] sync_send;
 
     always_ff @(posedge clk_uart_i) begin
@@ -46,7 +49,17 @@ module uart_peripheral (
         else            sync_send <= {sync_send[0], reg_send};
     end
 
-    assign tx_start_uart = sync_send[1];
+    // tx_start_uart es un pulso de 1 ciclo UART en flanco de subida de sync_send
+    assign tx_start_uart = sync_send[0] & ~sync_send[1];
+
+    // ACK de vuelta al dominio CPU: cuando sync_send[1] sube, reg_send fue capturado
+    logic [2:0] sync_send_ack;
+    always_ff @(posedge clk_cpu_i) begin
+        if (rst_cpu_i) sync_send_ack <= 3'b000;
+        else           sync_send_ack <= {sync_send_ack[1:0], sync_send[1]};
+    end
+    logic send_ack_pulse;
+    assign send_ack_pulse = sync_send_ack[1] & ~sync_send_ack[2];
 
     always_ff @(posedge clk_uart_i) begin
         if (rst_uart_i) data_in_uart <= 8'h00;
@@ -83,8 +96,12 @@ module uart_peripheral (
             reg_data_rx <= 8'h00;
             tx_busy     <= 1'b0;
         end else begin
-            if (tx_rdy_pulse) begin
+            // Bajar reg_send cuando el dominio UART confirmó que lo capturó
+            if (send_ack_pulse) begin
                 reg_send <= 1'b0;
+            end
+            // tx_busy baja cuando la transmisión termina (tx_rdy_pulse)
+            if (tx_rdy_pulse) begin
                 tx_busy  <= 1'b0;
             end
 

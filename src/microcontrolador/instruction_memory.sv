@@ -36,7 +36,7 @@ module instruction_memory #(
 
     // ── Inicialización desde archivo hex ──
     initial begin
-        $readmemh("C:/project_20/ControlEricPorfafuncione6.hex", IM);
+        $readmemh("/home/felipe/Documentos/Digitales/taller/Actualizacion18demayo/ControlEricPorfafuncione10.hex", IM);
     end
 
     // ── Lectura combinacional (asíncrona) ──

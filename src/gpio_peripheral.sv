@@ -1,20 +1,18 @@
 `timescale 1ns / 1ps
-
 module gpio_peripheral (
     input  logic        clk_i,
     input  logic        rst_i,
     output logic [31:0] rdata_o,
-    input  logic        boton_i
+    input  logic        boton_i,
+    input  logic [1:0]  sw_i       // [FIX] switches para freq_sel del PWM
 );
-
-    // [FIX] Debounce de 20 ms a 100 MHz (antes era 1000 = 10 us, insuficiente)
+    // Debounce de 20 ms a 100 MHz
     localparam int DEBOUNCE_MAX = 2_000_000;
-
     logic [1:0]  sync_boton;
-    logic [20:0] debounce_ctr;   // 21 bits para alcanzar 2_000_000
+    logic [20:0] debounce_ctr;
     logic        boton_estable;
 
-    // Sincronizador de doble flip-flop
+    // Sincronizador de doble flip-flop para el botón
     always_ff @(posedge clk_i) begin
         if (rst_i)
             sync_boton <= 2'b00;
@@ -41,6 +39,7 @@ module gpio_peripheral (
         end
     end
 
-    assign rdata_o = {31'd0, boton_estable};
+    // bit 0 = botón, bits [2:1] = switches para freq_sel
+    assign rdata_o = {29'd0, sw_i, boton_estable};
 
 endmodule

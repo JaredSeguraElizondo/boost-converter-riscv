@@ -66,17 +66,11 @@ module vga_mmio_wrapper (
     logic [9:0] vram [0:639]; 
     logic [9:0] vram_read_data;
 
-    logic [21:0] y_temp;
-    logic [9:0]  y_scaled;
-
-    always_comb begin
-        y_temp   = dat_i[11:0] * 22'd103;   // máx: 4095*103 = 421785 → cabe en 19 bits
-        y_scaled = 10'd460 - y_temp[19:10];  // >> 10
-    end
-
+    // El ensamblador ya manda la coordenada Y calculada directamente.
+    // Se usa dat_i[9:0] sin recalcular para evitar doble conversión.
     always_ff @(posedge clk_100mhz) begin
         if (we_i && addr_i == 4'h4) begin
-            vram[x_write_ptr] <= y_scaled;
+            vram[x_write_ptr] <= dat_i[9:0];
         end
     end
 

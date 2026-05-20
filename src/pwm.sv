@@ -1,8 +1,4 @@
-// =============================================================================
-// pwm.sv
-// -----------------------------------------------------------------------------
 // Periferico PWM para microcontrolador RISC-V (Proyecto 3, EL3313 / EL4201).
-//
 // Mapa de registros (mapeado en memoria a partir de 0x0001_0100):
 //   offset 0x00  Control/Estado:
 //                  bit 0       enable    (R/W)
@@ -12,13 +8,10 @@
 //   offset 0x04  Duty cycle:
 //                  bits[6:0]   duty_pct  (R/W)  0..100, satura fuera de rango
 //                  bits[31:7]  reservados
-//
 // Genera onda triangular con un contador up/down. La salida pwm_o esta alta
 // mientras counter < duty_count. pwm_trigger_o pulsa un ciclo en el valle.
-//
-// Compatible con Vivado XSim/Synth: evita bit-select sobre expresiones
-// y sobre elementos indexados de arreglos.
 
+`timescale 1ns / 1ps
 
 module pwm #(
     parameter int CLK_FREQ_HZ = 100_000_000
