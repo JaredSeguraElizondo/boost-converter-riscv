@@ -205,6 +205,31 @@ Periférico UART que actúa como puente entre el dominio de reloj del CPU y el d
 - Instancia internamente el módulo `UART` (núcleo serie externo).
 
 ---
+## Simulación — `uart_peripheral`
+
+El testbench valida el flujo completo de transmisión MMIO → UART en tres pruebas.
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/imagenes/tb_uart.png" width="500">
+
+### Test 1: enviar "Hi\n"
+
+El CPU escribe los bytes `0x48` (H), `0x69` (i) y `0x0A` (salto de línea) uno a uno. El monitor confirma que `RsTx` recibe cada byte correctamente. Tiempo total: ~396 ns de simulación.
+
+### Test 2: enviar "512\r\n"
+
+Se transmiten los caracteres `0x35` (5), `0x31` (1), `0x32` (2), `0x0D` (CR) y `0x0A` (LF). Todos son recibidos en `RsTx` sin errores, verificando que el periférico maneja correctamente cadenas multi-byte con terminadores de línea.
+
+### Test 3: lectura de registros
+
+Se leen las tres direcciones del mapa de registros al finalizar la transmisión:
+
+| `addr` | `rdata` | Interpretación |
+|---|---|---|
+| `00` | `0x00000000` | Estado: `tx_busy=0`, `new_rx=0`, `send=0` — periférico libre |
+| `01` | `0x0000000A` | `data_tx = 0x0A` — último byte escrito en el registro de transmisión |
+| `10` | `0x00000000` | `data_rx = 0x00` — no se recibió ningún byte en RsRx durante la prueba |
+
+---
 
 ### 2. `gpio_peripheral`
 
