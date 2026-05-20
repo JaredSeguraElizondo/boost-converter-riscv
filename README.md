@@ -169,3 +169,152 @@ Para validar el sistema implementado:
 
 Las discrepancias entre modelo y experimento suelen deberse a no linealidades, resistencias parásitas, retardo de muestreo o cuantización del ADC.
 
+### 1. `uart_peripheral`
+
+Periférico UART que actúa como puente entre el dominio de reloj del CPU y el dominio de reloj del UART. Incluye sincronización de señales entre dominios de reloj (CDC) mediante registros de sincronización de doble y triple flip-flop.
+
+#### Puertos
+
+| Puerto | Dirección | Ancho | Descripción |
+|---|---|---|---|
+| `clk_cpu_i` | entrada | 1 | Reloj del dominio CPU |
+| `rst_cpu_i` | entrada | 1 | Reset del dominio CPU |
+| `write_enable_i` | entrada | 1 | Habilitación de escritura MMIO |
+| `addr_i` | entrada | 2 | Dirección del registro a acceder |
+| `wdata_i` | entrada | 32 | Dato a escribir |
+| `rdata_o` | salida | 32 | Dato leído |
+| `clk_uart_i` | entrada | 1 | Reloj del dominio UART |
+| `rst_uart_i` | entrada | 1 | Reset del dominio UART |
+| `RsRx` | entrada | 1 | Línea de recepción serie |
+| `RsTx` | salida | 1 | Línea de transmisión serie |
+
+#### Mapa de Registros
+
+| `addr_i` | Acceso | Bit | Descripción |
+|---|---|---|---|
+| `2'b00` | R/W | `[0]` | `reg_send` — Escribir `1` para iniciar transmisión |
+| `2'b00` | R/W | `[1]` | `reg_new_rx` — Escribir `1` para limpiar la bandera de dato recibido |
+| `2'b00` | R | `[2]` | `tx_busy` — `1` mientras hay una transmisión en curso |
+| `2'b01` | R/W | `[7:0]` | `reg_data_tx` — Byte a transmitir |
+| `2'b10` | R | `[7:0]` | `reg_data_rx` — Último byte recibido |
+
+#### Notas de Diseño
+
+- La señal `reg_send` se sincroniza al dominio UART con un registro de 2 etapas antes de conectarse a `tx_start`.
+- `tx_rdy` y `rx_rdy` se sincronizan al dominio CPU con registros de 3 etapas para detectar flancos de subida (pulsos).
+- Instancia internamente el módulo `UART` (núcleo serie externo).
+
+---
+
+### 2. `gpio_peripheral`
+
+Periférico de entrada digital que lee un botón físico, lo sincroniza al dominio del reloj y aplica un filtro de debounce de 20 ms para eliminar rebotes mecánicos.
+
+#### Puertos
+
+| Puerto | Dirección | Ancho | Descripción |
+|---|---|---|---|
+| `clk_i` | entrada | 1 | Reloj del sistema (100 MHz) |
+| `rst_i` | entrada | 1 | Reset síncrono activo alto |
+| `rdata_o` | salida | 32 | Dato de lectura MMIO (`[0]` = estado del botón) |
+| `boton_i` | entrada | 1 | Señal del botón físico (sin sincronizar) |
+
+#### Comportamiento
+
+1. **Sincronizador CDC:** Doble flip-flop (`sync_boton`) para evitar metaestabilidad.
+2. **Debounce:** Contador de 21 bits que espera `2,000,000` ciclos (20 ms a 100 MHz) de nivel estable antes de actualizar `boton_estable`.
+3. **Salida:** `rdata_o = {31'd0, boton_estable}` — el bit 0 refleja el estado limpio del botón.
+
+#### Parámetros
+
+| Parámetro | Valor | Descripción |
+|---|---|---|
+| `DEBOUNCE_MAX` | `2_000_000` | Ciclos de reloj para el filtro de debounce (20 ms @ 100 MHz) |
+
+---
+
+### 3. `adc_xadc_mmio`
+
+Periférico que encapsula el IP XADC de Xilinx mediante su puerto DRP (Dynamic Reconfiguration Port). Permite al procesador iniciar conversiones ADC, leer los resultados de 12 bits y configurar fuentes de disparo externas (señal externa o PWM).
+
+#### Puertos
+
+| Puerto | Dirección | Ancho | Descripción |
+|---|---|---|---|
+| `clk` | entrada | 1 | Reloj del sistema |
+| `rst` | entrada | 1 | Reset síncrono activo alto |
+| `we_i` | entrada | 1 | Habilitación de escritura MMIO |
+| `addr_i` | entrada | 4 | Dirección del registro MMIO |
+| `dat_i` | entrada | 32 | Dato a escribir |
+| `dat_o` | salida | 32 | Dato leído |
+| `pwm_trigger_i` | entrada | 1 | Disparo de conversión desde PWM |
+| `adc_start_ext_i` | entrada | 1 | Disparo de conversión externo |
+| `convst_o` | salida | 1 | Señal de inicio de conversión al XADC |
+| `eoc_i` | entrada | 1 | End-of-Conversion del XADC |
+| `drdy_i` | entrada | 1 | Data Ready del puerto DRP |
+| `do_i` | entrada | 16 | Dato de salida del DRP |
+| `daddr_o` | salida | 7 | Dirección del registro DRP |
+| `den_o` | salida | 1 | Enable de lectura DRP |
+| `dwe_o` | salida | 1 | Write Enable DRP (siempre `0`, solo lectura) |
+| `di_o` | salida | 16 | Dato de entrada DRP (no usado) |
+
+#### Mapa de Registros
+
+| `addr_i` | Acceso | Bits | Descripción |
+|---|---|---|---|
+| `4'h0` | R/W | `[0]` | `start_pulse` — Escribir `1` para lanzar una conversión (pulso de 1 ciclo) |
+| `4'h0` | R/W | `[1]` | `new_data` — Dato disponible; escribir `1` para limpiar (RW1C) |
+| `4'h0` | R/W | `[2]` | `ext_start_en` — Habilitar disparo por `adc_start_ext_i` |
+| `4'h0` | R | `[3]` | `busy` — `1` mientras hay una conversión en progreso |
+| `4'h0` | R/W | `[4]` | `pwm_trig_en` — Habilitar disparo por `pwm_trigger_i` |
+| `4'h4` | R | `[11:0]` | Resultado ADC de 12 bits (se limpia `new_data` automáticamente al leer) |
+
+#### Máquina de Estados (FSM)
+
+La FSM tiene tres estados: `IDLE` → `READ_DRP` → `WAIT_DRDY` → `IDLE`. Espera el pulso `eoc_i` para iniciar la lectura DRP, habilita `den_o` por un ciclo y aguarda `drdy_i` para capturar el resultado.
+
+#### Notas de Diseño
+
+- Canal ADC configurado en `daddr_o = 7'h16` (VAUX6, pines J3/K3 de la Basys 3).
+- El XADC entrega el dato alineado a la izquierda en 16 bits; el módulo extrae los 12 MSB (`do_i[15:4]`).
+- La bandera `new_data` puede limpiarse por software (RW1C en offset `0x0`) o automáticamente al leer el offset `0x4`.
+
+---
+
+## Mapa de Registros
+
+### `uart_peripheral` — Base: `UART_BASE`
+
+| Offset | Campo | R/W | Descripción |
+|---|---|---|---|
+| `+0x0` | `[2]` tx_busy | R | Transmisión en curso |
+| `+0x0` | `[1]` new_rx | R/W | Nuevo dato recibido (escribir `1` para limpiar) |
+| `+0x0` | `[0]` send | W | Iniciar transmisión |
+| `+0x4` | `[7:0]` data_tx | R/W | Byte a transmitir |
+| `+0x8` | `[7:0]` data_rx | R | Byte recibido |
+
+### `gpio_peripheral` — Base: `GPIO_BASE`
+
+| Offset | Campo | R/W | Descripción |
+|---|---|---|---|
+| `+0x0` | `[0]` button | R | Estado del botón (con debounce) |
+
+### `adc_xadc_mmio` — Base: `ADC_BASE`
+
+| Offset | Campo | R/W | Descripción |
+|---|---|---|---|
+| `+0x0` | `[4]` pwm_trig_en | R/W | Habilitar disparo por PWM |
+| `+0x0` | `[3]` busy | R | Conversión en curso |
+| `+0x0` | `[2]` ext_start_en | R/W | Habilitar disparo externo |
+| `+0x0` | `[1]` new_data | R/W | Dato listo (RW1C) |
+| `+0x0` | `[0]` start | W | Iniciar conversión (pulso) |
+| `+0x4` | `[11:0]` adc_data | R | Resultado de la conversión ADC |
+
+---
+
+## Arquitectura e Integración
+
+Cada periférico recibe las señales de bus `write_enable`, `addr` y `wdata/rdata` desde el decodificador central. El arbitraje de direcciones y la selección del periférico activo se resuelven en el módulo TOP del proyecto.
+
+---
+
