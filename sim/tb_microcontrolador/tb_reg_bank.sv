@@ -1,10 +1,4 @@
-// ============================================================================
-// tb_reg_bank_proyecto3.sv
-// Cambios respecto al TB anterior:
-//   [FIX] Agrega puerto rst (el Reg_Bank del Proyecto 3 lo requiere)
-//   [NEW]  Verifica que x0 siempre es 0 (hardwired zero, critico para rv32i)
-//   [NEW]  Verifica que x31 funciona correctamente (usado como ra en assembly)
-// ============================================================================
+
 
 `timescale 1ns / 1ps
 
