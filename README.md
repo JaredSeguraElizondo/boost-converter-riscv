@@ -343,3 +343,185 @@ Cada periférico recibe las señales de bus `write_enable`, `addr` y `wdata/rdat
 
 ---
 
+# Resultados y Análisis de Simulación: Periférico VGA
+
+## Banco de pruebas
+
+Se desarrollaron dos testbenches con objetivos complementarios.
+
+**Testbench 1 (`tb_vga_periph.sv`):** Banco autoverificable con 8 pruebas (T1–T8) que cubren reset, registro de control, temporización de HSYNC y VSYNC, blanking y detección de píxel verde. Opera a 25 MHz y acumula resultados en contadores `pass_count` / `fail_count`.
+
+**Testbench 2 (`tb_vga_visual.sv`):** Banco de diagnóstico visual desarrollado ante la ausencia de señal verde en las primeras ejecuciones del TB1. En lugar de detectar cualquier píxel verde en un frame completo, llena todo el buffer circular con el mismo valor ADC (`adc = 2048` → fila 239) y verifica el ancho exacto de la línea verde en ciclos, su posición temporal precisa y las condiciones de color antes y después de ella.
+
+---
+
+## Resultados
+
+### Testbench 1 — Log de simulación
+
+```
+========================================
+ Inicio de simulación
+========================================
+
+[T1] Estado de reset
+  PASS [HSYNC=1 en reset]
+  PASS [VSYNC=1 en reset]
+  PASS [RED=0  en reset]
+  PASS [GRN=0  en reset]
+  PASS [BLU=0  en reset]
+
+[T2] Registro de control
+  PASS [rdata[0]=1 tras habilitar]
+  PASS [rdata[0]=0 tras deshabilitar]
+
+[T3] Periodo de HSYNC
+  INFO [HSYNC] periodo medido = 32000 ns
+  PASS [HSYNC periodo correcto]
+
+[T4] Ancho de pulso HSYNC
+  INFO [HSYNC] ancho de pulso = 3840 ns
+  PASS [HSYNC ancho de pulso correcto]
+
+[T5] Periodo de VSYNC (esperar ~2 frames...)
+  INFO [VSYNC] periodo medido = 16800000 ns
+  PASS [VSYNC periodo correcto]
+
+[T6] RGB = 0 durante blanking horizontal
+  PASS [RED=0 durante H-blanking]
+  PASS [GRN=0 durante H-blanking]
+  PASS [BLU=0 durante H-blanking]
+
+[T7] Deteccion de pixel verde tras escritura de muestra
+  PASS [Pixel verde detectado en frame tras escritura]
+
+[T8] Deshabilitar VGA apaga salidas
+  PASS [HSYNC=1 tras deshabilitar]
+  PASS [VSYNC=1 tras deshabilitar]
+  PASS [RED=0  tras deshabilitar]
+  PASS [GRN=0  tras deshabilitar]
+  PASS [BLU=0  tras deshabilitar]
+
+========================================
+ Resultados: 19 PASS  |  0 FAIL
+ TODOS LOS TESTS PASARON
+========================================
+```
+
+### Testbench 1 — Tabla resumen
+
+| ID | Descripción | Valor esperado | Medido / Observado | Estado |
+|---|---|---|---|---|
+| T1 | HSYNC, VSYNC y RGB en reset | `1`, `1`, `000` | `1`, `1`, `000` | **PASS** |
+| T2 | Lectura de `ctrl_enable` tras escritura | `rdata[0] = 1` / `0` | `1` / `0` | **PASS** |
+| T3 | Período de HSYNC | 32 000 ns | 32 000 ns | **PASS** |
+| T4 | Ancho de pulso HSYNC | 3 840 ns | 3 840 ns | **PASS** |
+| T5 | Período de VSYNC | 16 800 000 ns | 16 800 000 ns | **PASS** |
+| T6 | RGB = 0 durante H-blanking | `000` | `000` | **PASS** |
+| T7 | Píxel verde con `adc = 0` (fila 479) | `GRN=F, RED=0, BLU=0` | Detectado | **PASS** |
+| T8 | Syncs y RGB al deshabilitar | HSYNC=1, VSYNC=1, RGB=000 | Correcto | **PASS** |
+| — | **Total** | **19 afirmaciones** | — | **19 PASS / 0 FAIL** |
+
+### Testbench 1 — Forma de onda 
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/Imagenes_TestBenches/VGA_TB1.png" width="430">
+
+La Figura 1 muestra la captura de la simulación, correspondiente a las pruebas T2 y T3. Los aspectos más relevantes son:
+
+- `wdata` transiciona de `00000000` a `00000001` alrededor de los 6 950 µs, correspondiente a la escritura `enable = 1` de la prueba T2. Inmediatamente, `rdata` refleja `00000001`, confirmando que el registro de control se actualiza y es legible en el ciclo siguiente.
+- `hsync` exhibe pulsos activos-bajos periódicos cuyo período es consistente con el valor medido en T3 (32 000 ns = 800 ciclos × 40 ns).
+- `vsync = 1` sostenido en toda la ventana mostrada, lo cual es correcto dado que el período de VSYNC es de 16.8 ms y su pulso (≈ 64 µs de duración) no cae dentro del intervalo de 300 µs capturado.
+- `blu[3:0]` alterna entre `2` (fondo azul oscuro, zona visible) y `0` (blanking) en correspondencia con los ciclos de HSYNC, confirmando el comportamiento de la capa de fondo del módulo `vga_render`.
+- `red = 0` y `grn = 0` de forma sostenida, coherente con que la muestra escrita aún no ha sido alcanzada por el barrido en esa región temporal.
+- `pass_count = 9` y `fail_count = 0` al momento de la captura, indicando que las primeras nueve afirmaciones (T1 completo, T2 y T3) ya fueron evaluadas y aprobadas.
+
+---
+
+### Testbench 2 — Log de simulación
+
+```
+============================================
+ TB VISUAL: vga_periph
+============================================
+ Patron esperado:
+   blu[3:0] alterna entre 2 y 0 (fondo/blanking)
+   grn[3:0] sube a F por 25,600 ns en la fila 239
+   red[3:0] siempre en 0
+============================================
+[1] VGA habilitado
+[2] Escribiendo 640 muestras (adc=2048 → fila 239)...
+    Buffer lleno. grn=F aparecera en fila 239 por 25,600 ns.
+[3] Esperando negedge vsync...
+    negedge vsync en t = 15680140 ns
+
+  >>> Zoom aqui en el waveform viewer:
+  >>> grn=F (verde) desde t = 24448140 ns
+  >>> grn=F (verde) hasta t = 24473740 ns
+  >>> Duracion visible      = 25,600 ns
+  >>> Escala recomendada    = 5 us/div
+
+[4] Verificacion: grn=0 justo antes de la fila verde
+  PASS [grn=0 antes de la linea verde]
+  PASS [blu=0 en blanking horizontal previo]
+[5] Verificacion: grn=F durante la linea verde
+    Ciclos con grn=F detectados: 640 de 640 esperados
+  PASS [grn=F durante la linea verde (>= 630 ciclos)]
+[6] Verificacion: grn=0 despues de la linea verde
+  PASS [grn=0 despues de la linea verde]
+============================================
+ Resultados: 4 PASS  |  0 FAIL
+ TODOS LOS TESTS PASARON
+============================================
+```
+
+### Testbench 2 — Tabla resumen
+
+| ID | Descripción | Valor esperado | Medido / Observado | Estado |
+|---|---|---|---|---|
+| [4] | `grn = 0` justo antes de la fila 239 | `0` | `0` | **PASS** |
+| [4] | `blu = 0` en blanking horizontal previo | `0` | `0` | **PASS** |
+| [5] | Ciclos con `grn = F` durante la línea verde | 640 ciclos (≥ 630) | 640 ciclos | **PASS** |
+| [6] | `grn = 0` después de la fila verde | `0` | `0` | **PASS** |
+| — | **Total** | **4 afirmaciones** | — | **4 PASS / 0 FAIL** |
+
+El testbench también reportó las marcas de tiempo exactas de la línea verde: inicio en t = 24 448 140 ns y fin en t = 24 473 740 ns, con una duración de 25 600 ns = 640 ciclos × 40 ns, exactamente igual al ancho visible horizontal del estándar.
+
+### Testbench 2 — Forma de onda 
+
+<img src="https://gitlab.com/grupo034420017/proyecto03/-/raw/main/Imagenes_TestBenches/VGA_TB2.png" width="430">
+
+La igura muestra la captura del simulador alrededor de t = 74 865 µs, durante la verificación [5] del TB2. Los aspectos más relevantes son:
+
+- `grn[3:0]` presenta un pulso de valor `F` (verde brillante) claramente visible en el centro de la captura, flanqueado por períodos en `0`. Este pulso corresponde al barrido de la fila 239, la fila donde `vga_render` detecta la coincidencia `vcount == sample_y` para todos los 640 slots del buffer circular. Su ancho en la forma de onda es consistente con los 25 600 ns reportados en el log.
+- `blu[3:0]` alterna entre `2` y `0` a ambos lados del pulso verde, confirmando que las regiones de fondo y blanking adyacentes se generan correctamente. Durante el pulso verde, `blu` se mantiene en `0` dado que la capa de plot tiene mayor prioridad que la capa de fondo.
+- `red[3:0] = 0` de forma sostenida en todo el intervalo, confirmando que el canal rojo no interfiere con ninguna de las capas activas.
+- `offset = 4` y `wdata = 00000800` (valor estable), indicando que el testbench ya completó las 640 escrituras del buffer y se encuentra en la fase de monitoreo pasivo.
+- `pass_count = 4` y `fail_count = 0` al final de la simulación.
+- `hsync` continúa generando pulsos correctos, y `vsync = 1` sostenido, coherente con que la captura se toma dentro del área visible del frame (fila 239, lejos del blanking vertical).
+
+---
+
+## Análisis e interpretación
+
+
+### Estado de reset y registro de control (T1, T2, T8)
+
+Al liberar el reset, HSYNC y VSYNC permanecen inactivos y RGB en cero porque `ctrl_enable` se inicializa en `0` y las salidas se fuerzan combinacionalmente desde `vga_periph` mientras `enable = 0`. La prueba T2 confirmó que las escrituras al registro de control son funcionales y que el dato de retorno es inmediatamente consistente. La prueba T8 verificó el comportamiento simétrico al deshabilitar.
+
+### Blanking (T6)
+
+El resultado RGB = `000` durante el blanking horizontal confirma que `video_on` se genera correctamente y que `vga_render` lo prioriza sobre las demás capas. Este comportamiento también es visible en ambas formas de onda mediante la alternancia de `blu` entre `2` y `0`.
+
+### Generación del píxel de plot y diagnóstico de la falla inicial (T7 y TB2)
+
+Esta fue la prueba más relevante del proceso de verificación y la razón del segundo testbench.
+
+En la versión original del TB1, la ventana de monitoreo de T7 abarcaba solo `V_VISIBLE × H_TOTAL = 384 000` ciclos desde el flanco de bajada de VSYNC. El problema es que ese flanco ocurre en `vcount = 490`, no en `vcount = 0`: la región visible del frame siguiente no comienza hasta que el contador vertical recorra las 35 líneas de blanking restantes. El píxel verde de la fila 479 aparece aproximadamente en el ciclo `(35 + 479) × 800 ≈ 411 200` desde ese flanco, fuera de la ventana de 384 000 ciclos. La falla no era un defecto del hardware sino un error de cobertura temporal en el banco de pruebas.
+
+La corrección amplió la ventana a `V_TOTAL × H_TOTAL = 420 000` ciclos, cubriendo el frame completo. Con esto, T7 pasó en el TB1.
+
+El TB2 confirmó de forma independiente y más rigurosa que el hardware es correcto: los 640 ciclos con `grn = F` detectados coinciden exactamente con los 640 esperados (ancho visible de 25 600 ns). Las verificaciones antes y después de la línea verde confirman que no hay contaminación de color en las filas adyacentes. También puso en evidencia la latencia de un ciclo del pipeline registrado de `vga_render`, contemplada en el margen de entrada del banco (`repeat(6)` antes de la ventana de conteo).
+
+### Limitaciones
+
+El periférico no fue validado sobre hardware real en el proyecto.
